@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抽象小游戏</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui, sans-serif}
+body{background:#1a1a2e;color:#eee;padding:24px;max-width:760px;margin:0 auto}
+h1{text-align:center;margin-bottom:12px}
+.panel{background:#27293d;padding:20px;border-radius:12px;margin-bottom:16px}
+.row{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+button{padding:12px 20px;font-size:16px;border:none;border-radius:8px;cursor:pointer;background:#4361ee;color:white}
+button:hover{background:#3a52cc}
+button:disabled{background:#555;cursor:not-allowed}
+.info{line-height:1.8;font-size:16px}
+.log{max-height:220px;overflow:auto;background:#161725;padding:10px;border-radius:8px;margin-top:10px;font-size:14px}
+.win{color:#7cf07c}
+.lose{color:#ff7c7c}
+.draw{color:#cccc77}
+.achievement-bar{
+    background:#202040;
+    padding:12px 16px;
+    border-radius:10px;
+    margin-bottom:16px;
+}
+.achievement-item{
+    display:inline-block;
+    background:#2c2c54;
+    padding:6px 10px;
+    border-radius:6px;
+    margin:4px;
+    font-size:14px;
+    opacity:0.35;
+}
+.achievement-item.unlock{
+    opacity:1;
+    border:1px solid #ffd700;
+}
+.ach-toast{
+    position:fixed;
+    top:20px;
+    left:50%;
+    transform:translateX(-50%);
+    background:#ffd700;
+    color:#111;
+    padding:10px 20px;
+    border-radius:8px;
+    font-weight:bold;
+    z-index:1001;
+    display:none;
+}
+
+/* 弹窗样式 */
+.modal-wrap{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.75);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:999;
+}
+.modal-box{
+    background:#27293d;
+    padding:28px;
+    border-radius:14px;
+    max-width:520px;
+    width:90%;
+}
+.modal-box h2{margin-bottom:14px}
+.modal-box p{line-height:1.7;margin-bottom:18px}
+.hidden{display:none !important;}
+</style>
+</head>
+<body>
+
+<!-- 成就提示弹窗 -->
+<div id="achToast" class="ach-toast"></div>
+
+<!-- 规则弹窗 -->
+<div id="ruleModal" class="modal-wrap">
+    <div class="modal-box">
+        <h2>🏀抽象小游戏 - 游戏规则</h2>
+        <p>玩家与AI对战，出招：1、2、4、5<br>
+        克制关系：1>2，1=4，1&lt;5，2>4，2>5，4>5<br>
+        • 出1或5获胜：等概率+2分或+3分<br>
+        • 出2获胜：+3分<br>
+        • 出4获胜：+2分<br>
+        单局先到11分赢下本局，整体采用七局四胜制。<br>
+        有问题联系QQ:3402611627/微信:xiaoyukai717<br>
+        提示：不要在玩的时候刷新本界面！！！！！！！<br>
+	玩的时候被AI气死，本人一概不负责🐷</p>
+        <button onclick="closeRuleModal()">哦！！！！！！！！！！！</button>
+    </div>
+</div>
+
+<!-- 难度选择弹窗 -->
+<div id="diffModal" class="modal-wrap hidden">
+    <div class="modal-box">
+        <h2>选择难度</h2>
+        <div class="row">
+            <button onclick="selectDiff(1)">简单</button>
+            <button onclick="selectDiff(2)">普通</button>
+            <button onclick="selectDiff(3)">困难</button>
+        </div>
+    </div>
+</div>
+
+<!-- 游戏结束弹窗 -->
+<div id="endModal" class="modal-wrap hidden">
+    <div class="modal-box">
+        <h2 id="endTitle"></h2>
+        <p id="endText"></p>
+        <button onclick="closeEndModal()">再来一局整套比赛</button>
+    </div>
+</div>
+
+<h1>🏀抽象小游戏</h1>
+
+<!--成就栏-->
+<div class="achievement-bar">
+    <div><b>🏆成就</b></div>
+    <div id="achContainer">
+        <span class="achievement-item" data-key="comeback13">1:3翻盘</span>
+        <span class="achievement-item" data-key="comeback03">0:3翻盘</span>
+        <span class="achievement-item" data-key="shutout">单局零封</span>
+        <span class="achievement-item" data-key="sweep40">4:0横扫</span>
+    </div>
+</div>
+
+<div class="panel">
+  <div class="info">
+    <div id="diffText">当前难度：未选择</div>
+    <div>大比分(七局四胜)：玩家 <span id="setP">0</span> : <span id="setA">0</span> AI</div>
+    <div>本局分数：玩家 <span id="scoreP">0</span> : <span id="scoreA">0</span> AI（先到11分赢本局）</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div>请选择出招：</div>
+  <div class="row">
+    <button id="b1" onclick="play(1)" disabled>1.控卫</button>
+    <button id="b2" onclick="play(2)" disabled>2.分位</button>
+    <button id="b4" onclick="play(4)" disabled>4.大前</button>
+    <button id="b5" onclick="play(5)" disabled>5.中锋</button>
+  </div>
+  <div id="roundInfo"></div>
+  <div class="log" id="log"></div>
+</div>
+
+<div class="panel">
+  <button onclick="resetGame()">🔄重新开始整套比赛</button>
+</div>
+
+<script>
+const moves = [1,2,4,5];
+//已解锁成就集合
+let unlockedAchievements = new Set();
+//记录整套比赛过程中所有历史大比分快照，用于判断翻盘成就
+let setScoreHistory = [];
+
+// judge(p,a):1玩家胜，-1AI胜，0平局
+function judge(p,a){
+    if(p===a) return 0;
+    if(p===1){
+        if(a===2) return 1;
+        if(a===4) return 0;
+        if(a===5) return -1;
+    }
+    if(p===2){
+        if(a===1) return -1;
+        if(a===4) return 1;
+        if(a===5) return 1;
+    }
+    if(p===4){
+        if(a===1) return 0;
+        if(a===2) return -1;
+        if(a===5) return 1;
+    }
+    if(p===5){
+        if(a===1) return 1;
+        if(a===2) return -1;
+        if(a===4) return -1;
+    }
+    return 0;
+}
+
+// 获取可以击败 targetMove 的招式
+function getCounter(targetMove){
+    let counters=[];
+    for(let m of moves){
+        if(judge(targetMove,m) === -1){
+            counters.push(m);
+        }
+    }
+    return counters;
+}
+
+function getWinPoint(winnerMove){
+    if(winnerMove===1 || winnerMove===5){
+        return Math.random()>0.5 ? 2 :3;
+    }else if(winnerMove===2){
+        return 3;
+    }else if(winnerMove===4){
+        return 2;
+    }
+    return 0;
+}
+
+let diff=0;
+let setP=0,setA=0;
+let scoreP=0,scoreA=0;
+let history=[];
+let gameLock=false;
+
+//弹窗控制
+function closeRuleModal(){
+    document.getElementById("ruleModal").classList.add("hidden");
+    document.getElementById("diffModal").classList.remove("hidden");
+}
+function selectDiff(d){
+    diff=d;
+    const names={1:"简单",2:"普通",3:"困难"};
+    document.getElementById("diffText").innerText="当前难度："+names[d];
+    document.getElementById("diffModal").classList.add("hidden");
+    enableBtns(true);
+    resetSet();
+}
+
+//成就提示
+function showAchToast(text){
+    const t = document.getElementById("achToast");
+    t.innerText = "🏆解锁成就："+text;
+    t.style.display="block";
+    setTimeout(()=>{t.style.display="none"},2200);
+}
+function unlockAch(key,name){
+    if(unlockedAchievements.has(key)) return;
+    unlockedAchievements.add(key);
+    let el = document.querySelector(`[data-key="${key}"]`);
+    if(el) el.classList.add("unlock");
+    showAchToast(name);
+}
+
+//结束弹窗
+function showEndModal(isPlayerWin){
+    const modal=document.getElementById("endModal");
+    const title=document.getElementById("endTitle");
+    const text=document.getElementById("endText");
+    if(isPlayerWin){
+        title.innerText="🎉恭喜你获胜！";
+        text.innerText="你拿下整套七局四胜的比赛！";
+    }else{
+        title.innerText="💔比赛失败";
+        text.innerText="AI赢得整套比赛，再接再厉！";
+    }
+    modal.classList.remove("hidden");
+}
+function closeEndModal(){
+    document.getElementById("endModal").classList.add("hidden");
+    resetGame();
+}
+
+/**
+ * AI核心：读取历史玩家出招，统计频率
+ * diff1简单：小概率counter，大多随机
+ * diff2普通：中等概率counter高频招
+ * diff3困难：高概率counter你最常出的招式
+*/
+function aiChoose(){
+    //统计玩家每招出多少次
+    let count={1:0,2:0,4:0,5:0};
+    for(let h of history){
+        count[h.p]++;
+    }
+    //找玩家使用最多的招式
+    let maxCnt=-1;
+    let favMove=1;
+    for(let m of moves){
+        if(count[m]>maxCnt){
+            maxCnt=count[m];
+            favMove=m;
+        }
+    }
+    //得到克制玩家最爱招式的招
+    const counterMoves = getCounter(favMove);
+
+    //难度参数：多大几率使用counter招
+    let counterProb;
+    if(diff===1){
+        counterProb = 0.15; //简单：15%概率克制你
+    }else if(diff===2){
+        counterProb = 0.45; //普通：45%概率克制你
+    }else{
+        counterProb = 0.75; //困难：75%概率专门克制你的高频招式
+    }
+
+    let pick;
+    if(Math.random() < counterProb && counterMoves.length>0){
+        //选克制你的招式
+        pick = counterMoves[Math.floor(Math.random()*counterMoves.length)];
+    }else{
+        //完全随机出招
+        pick = moves[Math.floor(Math.random()*moves.length)];
+    }
+    return pick;
+}
+
+function resetSet(){
+    scoreP=0;scoreA=0;
+    history=[];
+    updateUi();
+    clearLog();
+    document.getElementById("roundInfo").innerText="";
+    gameLock=false;
+    enableBtns(true);
+}
+
+function resetGame(){
+    setP=0;setA=0;
+    setScoreHistory = [];
+    resetSet();
+    updateUi();
+}
+
+function updateUi(){
+    document.getElementById("setP").innerText=setP;
+    document.getElementById("setA").innerText=setA;
+    document.getElementById("scoreP").innerText=scoreP;
+    document.getElementById("scoreA").innerText=scoreA;
+}
+
+function enableBtns(flag){
+    document.getElementById("b1").disabled=!flag;
+    document.getElementById("b2").disabled=!flag;
+    document.getElementById("b4").disabled=!flag;
+    document.getElementById("b5").disabled=!flag;
+}
+
+function addLog(text,cls=""){
+    const logDom=document.getElementById("log");
+    const div=document.createElement("div");
+    div.className=cls;
+    div.innerText=text;
+    logDom.appendChild(div);
+    logDom.scrollTop=logDom.scrollHeight;
+}
+function clearLog(){document.getElementById("log").innerHTML=""}
+
+async function play(playerMove){
+    if(gameLock) return;
+    gameLock=true;
+    enableBtns(false);
+    const aiMove = aiChoose();
+    const res = judge(playerMove, aiMove);
+    history.push({p:playerMove,a:aiMove,res});
+
+    let info=`你出：${playerMove}(${getMoveName(playerMove)})，AI出：${aiMove}(${getMoveName(aiMove)})`;
+    document.getElementById("roundInfo").innerText=info;
+
+    let logText;
+    if(res===0){
+        logText=info+" → 平局，不得分";
+        addLog(logText,"draw");
+    }else if(res===1){
+        const pt=getWinPoint(playerMove);
+        scoreP+=pt;
+        logText=info+` → 你赢本回合！+${pt}分`;
+        addLog(logText,"win");
+    }else{
+        const pt=getWinPoint(aiMove);
+        scoreA+=pt;
+        logText=info+` → AI赢本回合！+${pt}分`;
+        addLog(logText,"lose");
+    }
+    updateUi();
+
+    await sleep(600);
+    if(scoreP>=11 || scoreA>=11){
+        if(scoreP>=11){
+            //单局胜利，零封条件：AI本局得0分
+            if(scoreA === 0){
+                unlockAch("shutout","零封");
+            }
+            setP++;
+            addLog("✅你赢下本局！","win");
+        }else{
+            setA++;
+            addLog("❌AI赢下本局！","lose");
+        }
+        //保存当前大比分快照
+        setScoreHistory.push({p:setP,a:setA});
+        updateUi();
+        await sleep(1000);
+        if(setP>=4 || setA>=4){
+            //整套比赛结束检测成就
+            if(setP >=4){
+                if(setA === 0){
+                    unlockAch("sweep40","4:0横扫");
+                }
+                //遍历历史，看是否曾经出现0‑3、1‑3
+                let ever0to3 = setScoreHistory.some(s=> s.p===0 && s.a===3);
+                let ever1to3 = setScoreHistory.some(s=> s.p===1 && s.a===3);
+                if(ever0to3){
+                    unlockAch("comeback03","0:3翻盘");
+                }else if(ever1to3){
+                    unlockAch("comeback13","1:3翻盘");
+                }
+            }
+            showEndModal(setP>=4);
+            return;
+        }else{
+            resetSet();
+            return;
+        }
+    }
+    gameLock=false;
+    enableBtns(true);
+}
+
+function getMoveName(m){
+    const map={1:"控卫",2:"分位",4:"大前",5:"中锋"};
+    return map[m];
+}
+
+function sleep(ms){
+    return new Promise(r=>setTimeout(r,ms));
+}
+</script>
+</body>
+</html>
