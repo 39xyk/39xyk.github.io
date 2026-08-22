@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抽象小游戏 - 双人联机</title>
+<!-- 引入PeerJS P2P库 -->
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui, sans-serif}
+body{background:#1a1a2e;color:#eee;padding:24px;max-width:760px;margin:0 auto}
+h1{text-align:center;margin-bottom:12px}
+.panel{background:#27293d;padding:20px;border-radius:12px;margin-bottom:16px}
+.row{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+input{padding:10px;font-size:16px;border-radius:8px;border:none;width:220px}
+button{padding:12px 20px;font-size:16px;border:none;border-radius:8px;cursor:pointer;background:#4361ee;color:white}
+button:hover{background:#3a52cc}
+button:disabled{background:#555;cursor:not-allowed}
+.info{line-height:1.8;font-size:16px}
+.log{max-height:220px;overflow:auto;background:#161725;padding:10px;border-radius:8px;margin-top:10px;font-size:14px}
+.win{color:#7cf07c}
+.lose{color:#ff7c7c}
+.draw{color:#cccc77}
+.achievement-bar{
+    background:#202040;
+    padding:12px 16px;
+    border-radius:10px;
+    margin-bottom:16px;
+}
+.achievement-item{
+    display:inline-block;
+    background:#2c2c54;
+    padding:6px 10px;
+    border-radius:6px;
+    margin:4px;
+    font-size:14px;
+    opacity:0.35;
+}
+.achievement-item.unlock{
+    opacity:1;
+    border:1px solid #ffd700;
+}
+.ach-toast{
+    position:fixed;
+    top:20px;
+    left:50%;
+    transform:translateX(-50%);
+    background:#ffd700;
+    color:#111;
+    padding:10px 20px;
+    border-radius:8px;
+    font-weight:bold;
+    z-index:1001;
+    display:none;
+}
+/* 弹窗样式 */
+.modal-wrap{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.75);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:999;
+}
+.modal-box{
+    background:#27293d;
+    padding:28px;
+    border-radius:14px;
+    max-width:520px;
+    width:90%;
+}
+.modal-box h2{margin-bottom:14px}
+.modal-box p{line-height:1.7;margin-bottom:18px}
+.hidden{display:none !important;}
+.status-text{color:#88ddff;margin:8px 0;}
+.wait-hint{
+    color:#ffdd77;
+    font-weight:bold;
+    margin:10px 0;
+    font-size:17px;
+}
+</style>
+</head>
+<body>
+<!-- 成就提示弹窗 -->
+<div id="achToast" class="ach-toast"></div>
+<!-- 规则弹窗 -->
+<div id="ruleModal" class="modal-wrap">
+    <div class="modal-box">
+        <h2>🏀抽象小游戏 - 联机双人对战规则</h2>
+        <p>双人对战，出招：1、2、4、5<br>
+        克制关系：1>2，1=4，1&lt;5，2>4，2>5，4>5<br>
+        • 出1或5获胜：等概率+2分或+3分<br>
+        • 出2获胜：+3分<br>
+        • 出4获胜：+2分<br>
+        单局先到11分赢下本局，整体采用七局四胜制。<br>
+        联机说明：一人创建房间，把房间号发给好友，好友输入房间号加入。
+        </p>
+        <button onclick="closeRuleModal()">明白了</button>
+    </div>
+</div>
+
+<!-- 游戏结束弹窗 -->
+<div id="endModal" class="modal-wrap hidden">
+    <div class="modal-box">
+        <h2 id="endTitle"></h2>
+        <p id="endText"></p>
+        <button onclick="closeEndModal()">再来整套比赛</button>
+    </div>
+</div>
+
+<h1>🏀抽象小游戏【双人联机版】</h1>
+
+<!--联机面板-->
+<div class="panel">
+    <div class="status-text" id="connStatus">未连接，创建或加入房间开始联机对战</div>
+    <div class="row">
+        <button onclick="createRoom()">创建房间</button>
+    </div>
+    <div>你的房间ID：<span id="myRoomId">--</span></div>
+    <div class="row" style="margin-top:10px">
+        <input id="remoteIdInput" placeholder="输入好友房间ID">
+        <button onclick="joinRoom()">加入好友房间</button>
+    </div>
+</div>
+
+<!--成就栏-->
+<div class="achievement-bar">
+    <div><b>🏆成就</b></div>
+    <div id="achContainer">
+        <span class="achievement-item" data-key="comeback13">1:3翻盘</span>
+        <span class="achievement-item" data-key="comeback03">0:3翻盘</span>
+        <span class="achievement-item" data-key="shutout">单局零封</span>
+        <span class="achievement-item" data-key="sweep40">4:0横扫</span>
+    </div>
+</div>
+
+<div class="panel">
+  <div class="info">
+    <div>大比分(七局四胜)：你 <span id="setP">0</span> : <span id="setA">0</span> 对手</div>
+    <div>本局分数：你 <span id="scoreP">0</span> : <span id="scoreA">0</span> 对手（先到11分赢本局）</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div id="roundHint" class="wait-hint">请等待连接对手</div>
+  <div class="row">
+    <button id="b1" onclick="sendMove(1)" disabled>1.控卫</button>
+    <button id="b2" onclick="sendMove(2)" disabled>2.分位</button>
+    <button id="b4" onclick="sendMove(4)" disabled>4.大前</button>
+    <button id="b5" onclick="sendMove(5)" disabled>5.中锋</button>
+  </div>
+  <div id="roundInfo"></div>
+  <div class="log" id="log"></div>
+</div>
+
+<div class="panel">
+  <button onclick="resetGame()">🔄重新开始整套比赛</button>
+</div>
+
+<script>
+const moves = [1,2,4,5];
+//已解锁成就集合
+let unlockedAchievements = new Set();
+let setScoreHistory = [];
+
+// judge(p,a):1我方胜，-1对手胜，0平局
+function judge(p,a){
+    if(p===a) return 0;
+    if(p===1){
+        if(a===2) return 1;
+        if(a===4) return 0;
+        if(a===5) return -1;
+    }
+    if(p===2){
+        if(a===1) return -1;
+        if(a===4) return 1;
+        if(a===5) return 1;
+    }
+    if(p===4){
+        if(a===1) return 0;
+        if(a===2) return -1;
+        if(a===5) return 1;
+    }
+    if(p===5){
+        if(a===1) return 1;
+        if(a===2) return -1;
+        if(a===4) return -1;
+    }
+    return 0;
+}
+
+function getCounter(targetMove){
+    let counters=[];
+    for(let m of moves){
+        if(judge(targetMove,m) === -1){
+            counters.push(m);
+        }
+    }
+    return counters;
+}
+function getWinPoint(winnerMove){
+    if(winnerMove===1 || winnerMove===5){
+        return Math.random()>0.5 ? 2 :3;
+    }else if(winnerMove===2){
+        return 3;
+    }else if(winnerMove===4){
+        return 2;
+    }
+    return 0;
+}
+
+// 游戏状态
+let setP=0,setA=0;
+let scoreP=0,scoreA=0;
+let gameLock=false;
+let peer = null;
+let conn = null; //和对方的P2P连接
+let myMove = null;
+let enemyMove = null;
+
+//弹窗控制
+function closeRuleModal(){
+    document.getElementById("ruleModal").classList.add("hidden");
+}
+
+//成就提示
+function showAchToast(text){
+    const t = document.getElementById("achToast");
+    t.innerText = "🏆解锁成就："+text;
+    t.style.display="block";
+    setTimeout(()=>{t.style.display="none"},2200);
+}
+function unlockAch(key,name){
+    if(unlockedAchievements.has(key)) return;
+    unlockedAchievements.add(key);
+    let el = document.querySelector(`[data-key="${key}"]`);
+    if(el) el.classList.add("unlock");
+    showAchToast(name);
+}
+
+//结束弹窗
+function showEndModal(isPlayerWin){
+    const modal=document.getElementById("endModal");
+    const title=document.getElementById("endTitle");
+    const text=document.getElementById("endText");
+    if(isPlayerWin){
+        title.innerText="🎉恭喜你获胜！";
+        text.innerText="你拿下整套七局四胜的比赛！";
+    }else{
+        title.innerText="💔比赛失败";
+        text.innerText="对手赢得整套比赛，再接再厉！";
+    }
+    modal.classList.remove("hidden");
+}
+function closeEndModal(){
+    document.getElementById("endModal").classList.add("hidden");
+    resetGame();
+}
+
+// 更新回合提示文字
+function updateRoundHint(){
+    const hintDom = document.getElementById("roundHint");
+    if(!conn){
+        hintDom.innerText = "⚠️请等待连接对手";
+    }else if(myMove !== null){
+        hintDom.innerText = "✅你已出招，等待对手出招…";
+    }else{
+        hintDom.innerText = "🎯请选择你的出招";
+    }
+}
+
+function resetSet(){
+    scoreP=0;scoreA=0;
+    myMove=null;
+    enemyMove=null;
+    updateUi();
+    clearLog();
+    document.getElementById("roundInfo").innerText="";
+    gameLock=false;
+    updateRoundHint();
+}
+function resetGame(){
+    setP=0;setA=0;
+    setScoreHistory = [];
+    resetSet();
+    updateUi();
+}
+function updateUi(){
+    document.getElementById("setP").innerText=setP;
+    document.getElementById("setA").innerText=setA;
+    document.getElementById("scoreP").innerText=scoreP;
+    document.getElementById("scoreA").innerText=scoreA;
+}
+function enableBtns(flag){
+    document.getElementById("b1").disabled=!flag;
+    document.getElementById("b2").disabled=!flag;
+    document.getElementById("b4").disabled=!flag;
+    document.getElementById("b5").disabled=!flag;
+    updateRoundHint();
+}
+function addLog(text,cls=""){
+    const logDom=document.getElementById("log");
+    const div=document.createElement("div");
+    div.className=cls;
+    div.innerText=text;
+    logDom.appendChild(div);
+    logDom.scrollTop=logDom.scrollHeight;
+}
+function clearLog(){document.getElementById("log").innerHTML=""}
+function getMoveName(m){
+    const map={1:"控卫",2:"分位",4:"大前",5:"中锋"};
+    return map[m];
+}
+function sleep(ms){
+    return new Promise(r=>setTimeout(r,ms));
+}
+
+// ========== P2P联机逻辑 ==========
+function setConnStatus(s){
+    document.getElementById("connStatus").innerText = s;
+}
+
+//创建房间（自己作为主机）
+function createRoom(){
+    if(peer) return;
+    peer = new Peer();
+    peer.on('open', (id)=>{
+        document.getElementById("myRoomId").innerText = id;
+        setConnStatus(`✅房间创建成功，请把房间ID发给你的好友: ${id}`);
+    });
+    peer.on('connection', (c)=>{
+        conn = c;
+        setupConnection();
+    });
+    peer.on('error', err=>{
+        setConnStatus(`❌创建房间出错:${err.type}`);
+    })
+}
+
+//加入别人房间
+function joinRoom(){
+    const rid = document.getElementById("remoteIdInput").value.trim();
+    if(!rid){alert("请输入房间ID");return;}
+    if(peer===null) peer = new Peer();
+    peer.on('open',()=>{
+        conn = peer.connect(rid);
+        setupConnection();
+    })
+}
+
+function setupConnection(){
+    setConnStatus("🔗已与对手建立连接，可以开始出招！");
+    enableBtns(true);
+
+    //收到对方消息
+    conn.on('data', (msg)=>{
+        if(msg.type === "move"){
+            enemyMove = msg.value;
+            updateRoundHint();
+            checkRoundReady();
+        }
+        if(msg.type === "reset"){
+            resetGame();
+        }
+    });
+
+    conn.on('close',()=>{
+        setConnStatus("⚠️对手断开连接！");
+        enableBtns(false);
+    })
+}
+
+//我方发送出招
+function sendMove(move){
+    if(gameLock || !conn || myMove!==null) return;
+    gameLock=true;
+    myMove = move;
+    conn.send({type:"move", value:move});
+    enableBtns(false);
+    checkRoundReady();
+}
+
+// 双方都出招完成，结算回合
+async function checkRoundReady(){
+    if(myMove===null || enemyMove===null){
+        return;
+    }
+    const p = myMove;
+    const a = enemyMove;
+    const res = judge(p,a);
+    let info=`你出：${p}(${getMoveName(p)})，对手出：${a}(${getMoveName(a)})`;
+    document.getElementById("roundInfo").innerText=info;
+    let logText;
+    if(res===0){
+        logText=info+" → 平局，不得分";
+        addLog(logText,"draw");
+    }else if(res===1){
+        const pt=getWinPoint(p);
+        scoreP+=pt;
+        logText=info+` → 你赢本回合！+${pt}分`;
+        addLog(logText,"win");
+    }else{
+        const pt=getWinPoint(a);
+        scoreA+=pt;
+        logText=info+` → 对手赢本回合！+${pt}分`;
+        addLog(logText,"lose");
+    }
+    updateUi();
+    await sleep(600);
+
+    if(scoreP>=11 || scoreA>=11){
+        if(scoreP>=11){
+            if(scoreA === 0){
+                unlockAch("shutout","零封");
+            }
+            setP++;
+            addLog("✅你赢下本局！","win");
+        }else{
+            setA++;
+            addLog("❌对手赢下本局！","lose");
+        }
+        setScoreHistory.push({p:setP,a:setA});
+        updateUi();
+        await sleep(1000);
+
+        if(setP>=4 || setA>=4){
+            if(setP >=4){
+                if(setA === 0){
+                    unlockAch("sweep40","4:0横扫");
+                }
+                let ever0to3 = setScoreHistory.some(s=> s.p===0 && s.a===3);
+                let ever1to3 = setScoreHistory.some(s=> s.p===1 && s.a===3);
+                if(ever0to3){
+                    unlockAch("comeback03","0:3翻盘");
+                }else if(ever1to3){
+                    unlockAch("comeback13","1:3翻盘");
+                }
+            }
+            showEndModal(setP>=4);
+            return;
+        }else{
+            resetSet();
+            return;
+        }
+    }
+    //回合结束，清空本回合出招
+    myMove=null;
+    enemyMove=null;
+    gameLock=false;
+    enableBtns(true);
+}
+
+</script>
+</body>
+</html>
