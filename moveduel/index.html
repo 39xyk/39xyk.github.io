@@ -3,8 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>抽象小游戏 - 双人联机</title>
-<!-- 引入PeerJS P2P库 -->
+<title>抽象小游戏</title>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui, sans-serif}
@@ -53,7 +52,6 @@ button:disabled{background:#555;cursor:not-allowed}
     z-index:1001;
     display:none;
 }
-/* 弹窗样式 */
 .modal-wrap{
     position:fixed;
     inset:0;
@@ -83,25 +81,23 @@ button:disabled{background:#555;cursor:not-allowed}
 </style>
 </head>
 <body>
-<!-- 成就提示弹窗 -->
 <div id="achToast" class="ach-toast"></div>
-<!-- 规则弹窗 -->
 <div id="ruleModal" class="modal-wrap">
     <div class="modal-box">
-        <h2>🏀抽象小游戏 - 联机双人对战规则</h2>
+        <h2>🏀抽象小游戏 双人对战规则</h2>
         <p>双人对战，出招：1、2、4、5<br>
         克制关系：1>2，1=4，1&lt;5，2>4，2>5，4>5<br>
         • 出1或5获胜：等概率+2分或+3分<br>
         • 出2获胜：+3分<br>
         • 出4获胜：+2分<br>
-        单局先到11分赢下本局，整体采用七局四胜制。<br>
-        联机说明：一人创建房间，把房间号发给好友，好友输入房间号加入。
+        单局先到11分赢本局，整体七局四胜制。<br>
+	有bug联系QQ：3402611627/微信：xiaoyukai717😁😁😁<br>
+        联机说明：一人创建房间，复制房间ID发给好友，好友输入ID加入对战。
         </p>
-        <button onclick="closeRuleModal()">明白了</button>
+        <button onclick="closeRuleModal()">哦！！！！！！！！！！！！</button>
     </div>
 </div>
 
-<!-- 游戏结束弹窗 -->
 <div id="endModal" class="modal-wrap hidden">
     <div class="modal-box">
         <h2 id="endTitle"></h2>
@@ -112,7 +108,6 @@ button:disabled{background:#555;cursor:not-allowed}
 
 <h1>🏀抽象小游戏【双人联机版】</h1>
 
-<!--联机面板-->
 <div class="panel">
     <div class="status-text" id="connStatus">未连接，创建或加入房间开始联机对战</div>
     <div class="row">
@@ -125,7 +120,6 @@ button:disabled{background:#555;cursor:not-allowed}
     </div>
 </div>
 
-<!--成就栏-->
 <div class="achievement-bar">
     <div><b>🏆成就</b></div>
     <div id="achContainer">
@@ -144,7 +138,7 @@ button:disabled{background:#555;cursor:not-allowed}
 </div>
 
 <div class="panel">
-  <div id="roundHint" class="wait-hint">请等待连接对手</div>
+  <div id="roundHint" class="wait-hint">⚠️请等待连接对手</div>
   <div class="row">
     <button id="b1" onclick="sendMove(1)" disabled>1.控卫</button>
     <button id="b2" onclick="sendMove(2)" disabled>2.分位</button>
@@ -161,11 +155,9 @@ button:disabled{background:#555;cursor:not-allowed}
 
 <script>
 const moves = [1,2,4,5];
-//已解锁成就集合
 let unlockedAchievements = new Set();
 let setScoreHistory = [];
 
-// judge(p,a):1我方胜，-1对手胜，0平局
 function judge(p,a){
     if(p===a) return 0;
     if(p===1){
@@ -211,21 +203,28 @@ function getWinPoint(winnerMove){
     return 0;
 }
 
-// 游戏状态
 let setP=0,setA=0;
 let scoreP=0,scoreA=0;
 let gameLock=false;
 let peer = null;
-let conn = null; //和对方的P2P连接
+let conn = null;
 let myMove = null;
 let enemyMove = null;
 
-//弹窗控制
+// 增加STUN服务器配置，提高穿透成功率
+const peerConfig = {
+    config: {
+        iceServers: [
+            {urls:"stun:stun.l.google.com:19302"},
+            {urls:"stun:stun1.l.google.com:19302"}
+        ]
+    }
+};
+
 function closeRuleModal(){
     document.getElementById("ruleModal").classList.add("hidden");
 }
 
-//成就提示
 function showAchToast(text){
     const t = document.getElementById("achToast");
     t.innerText = "🏆解锁成就："+text;
@@ -240,7 +239,6 @@ function unlockAch(key,name){
     showAchToast(name);
 }
 
-//结束弹窗
 function showEndModal(isPlayerWin){
     const modal=document.getElementById("endModal");
     const title=document.getElementById("endTitle");
@@ -259,7 +257,6 @@ function closeEndModal(){
     resetGame();
 }
 
-// 更新回合提示文字
 function updateRoundHint(){
     const hintDom = document.getElementById("roundHint");
     if(!conn){
@@ -286,6 +283,9 @@ function resetGame(){
     setScoreHistory = [];
     resetSet();
     updateUi();
+    if(conn && conn.open){
+        conn.send({type:"reset"});
+    }
 }
 function updateUi(){
     document.getElementById("setP").innerText=setP;
@@ -317,44 +317,19 @@ function sleep(ms){
     return new Promise(r=>setTimeout(r,ms));
 }
 
-// ========== P2P联机逻辑 ==========
 function setConnStatus(s){
     document.getElementById("connStatus").innerText = s;
 }
 
-//创建房间（自己作为主机）
-function createRoom(){
-    if(peer) return;
-    peer = new Peer();
-    peer.on('open', (id)=>{
-        document.getElementById("myRoomId").innerText = id;
-        setConnStatus(`✅房间创建成功，请把房间ID发给你的好友: ${id}`);
+// 【修复重点】真正连接就绪才执行setupConnection
+function bindConnection(c){
+    conn = c;
+    // 必须监听open事件！通道真正打开
+    conn.on('open', ()=>{
+        setConnStatus("🔗已与对手建立连接，可以开始出招！");
+        enableBtns(true);
     });
-    peer.on('connection', (c)=>{
-        conn = c;
-        setupConnection();
-    });
-    peer.on('error', err=>{
-        setConnStatus(`❌创建房间出错:${err.type}`);
-    })
-}
 
-//加入别人房间
-function joinRoom(){
-    const rid = document.getElementById("remoteIdInput").value.trim();
-    if(!rid){alert("请输入房间ID");return;}
-    if(peer===null) peer = new Peer();
-    peer.on('open',()=>{
-        conn = peer.connect(rid);
-        setupConnection();
-    })
-}
-
-function setupConnection(){
-    setConnStatus("🔗已与对手建立连接，可以开始出招！");
-    enableBtns(true);
-
-    //收到对方消息
     conn.on('data', (msg)=>{
         if(msg.type === "move"){
             enemyMove = msg.value;
@@ -366,15 +341,57 @@ function setupConnection(){
         }
     });
 
+    conn.on('error',(err)=>{
+        setConnStatus("❌连接发生错误："+err.type);
+        enableBtns(false);
+    });
+
     conn.on('close',()=>{
         setConnStatus("⚠️对手断开连接！");
         enableBtns(false);
+    });
+}
+
+// 创建房间（主机）
+function createRoom(){
+    if(peer) return;
+    peer = new Peer(peerConfig);
+
+    peer.on('open', (id)=>{
+        document.getElementById("myRoomId").innerText = id;
+        setConnStatus(`✅房间创建成功，请把房间ID发给你的好友: ${id}`);
+    });
+
+    // 收到外部连接请求
+    peer.on('connection', (c)=>{
+        bindConnection(c);
+    });
+
+    peer.on('error', err=>{
+        setConnStatus(`❌Peer错误:${err.type}`);
+    })
+}
+
+// 加入房间（访客）
+function joinRoom(){
+    const rid = document.getElementById("remoteIdInput").value.trim();
+    if(!rid){alert("请输入房间ID");return;}
+    if(peer===null) peer = new Peer(peerConfig);
+
+    // connect必须放在open回调内部，修复时序bug
+    peer.on('open',()=>{
+        const c = peer.connect(rid);
+        bindConnection(c);
+    });
+
+    peer.on('error',err=>{
+        setConnStatus("❌加入房间失败:"+err.type);
     })
 }
 
 //我方发送出招
 function sendMove(move){
-    if(gameLock || !conn || myMove!==null) return;
+    if(gameLock || !conn || !conn.open || myMove!==null) return;
     gameLock=true;
     myMove = move;
     conn.send({type:"move", value:move});
@@ -382,7 +399,7 @@ function sendMove(move){
     checkRoundReady();
 }
 
-// 双方都出招完成，结算回合
+//双方出招完成结算
 async function checkRoundReady(){
     if(myMove===null || enemyMove===null){
         return;
@@ -445,13 +462,11 @@ async function checkRoundReady(){
             return;
         }
     }
-    //回合结束，清空本回合出招
     myMove=null;
     enemyMove=null;
     gameLock=false;
     enableBtns(true);
 }
-
 </script>
 </body>
 </html>
